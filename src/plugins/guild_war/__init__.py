@@ -6,6 +6,7 @@
 from nonebot import get_driver
 from .database import init_db
 from . import handlers  # noqa: F401 - 注册所有指令
+from . import homework  # noqa: F401 - 注册作业指令
 from . import scheduler  # noqa: F401 - 注册定时任务
 
 driver = get_driver()

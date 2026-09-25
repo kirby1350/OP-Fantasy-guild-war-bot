@@ -1,14 +1,15 @@
 import nonebot
-from nonebot.adapters.onebot.v11 import Adapter as OneBot11Adapter
+from nonebot.adapters.qq import Adapter as QQAdapter
 
-nonebot.init()
+nonebot.init(driver="~fastapi+~httpx")
 
 app = nonebot.get_asgi()
 
 driver = nonebot.get_driver()
-driver.register_adapter(OneBot11Adapter)
+driver.register_adapter(QQAdapter)
 
-nonebot.load_plugin("src.plugins.guild_war")
+if nonebot.load_plugin("src.plugins.guild_war") is None:
+    raise RuntimeError("工会战插件加载失败，请检查启动日志。")
 
 if __name__ == "__main__":
-    nonebot.run(app="bot:app")
+    nonebot.run()

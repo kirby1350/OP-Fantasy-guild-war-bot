@@ -1,6 +1,7 @@
 """每日出刀情况图表生成"""
 
 import asyncio
+from hashlib import sha256
 from datetime import date
 from pathlib import Path
 from typing import List
@@ -115,7 +116,7 @@ def _generate_chart_sync(
     # 标题
     today = date.today().strftime("%Y-%m-%d")
     ax.set_title(
-        f"工会战每日出刀汇总  |  第 {round_num} 周目  |  {today}",
+        f"工会战每日出刀汇总  |  第 {round_num} 只 BOSS  |  {today}",
         color=text_color, fontsize=13, pad=15, fontweight="bold"
     )
 
@@ -125,7 +126,8 @@ def _generate_chart_sync(
 
     plt.tight_layout()
 
-    out_path = OUTPUT_DIR / f"{group_id}_{date.today().isoformat()}.png"
+    safe_group = sha256(group_id.encode()).hexdigest()[:24]
+    out_path = OUTPUT_DIR / f"{safe_group}_{date.today().isoformat()}.png"
     fig.savefig(out_path, dpi=130, bbox_inches="tight",
                 facecolor=bg, edgecolor="none")
     plt.close(fig)

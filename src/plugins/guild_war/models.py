@@ -6,6 +6,14 @@ from enum import Enum
 from typing import Optional
 
 
+@dataclass(frozen=True)
+class GuildContext:
+    """领域 ID 包含平台和 AppID，避免官方身份与旧 QQ 号数据混用。"""
+    group_id: str
+    user_id: str
+    user_name: str
+
+
 class KnifeType(str, Enum):
     NORMAL = "normal"          # 普通刀
     TAIL = "tail"              # 尾刀（击杀BOSS）
@@ -16,7 +24,7 @@ class KnifeType(str, Enum):
 class KnifeRecord:
     """单次出刀记录"""
     id: Optional[int]
-    user_id: str           # QQ号
+    user_id: str           # 带平台/AppID 前缀的官方用户标识
     user_name: str         # 昵称
     group_id: str          # 群号
     damage: int            # 伤害值
@@ -32,9 +40,9 @@ class KnifeRecord:
 class BossStatus:
     """当前BOSS状态"""
     group_id: str
-    round_num: int         # 当前周目
+    round_num: int         # 当前第几只 BOSS，不等于游戏 Lv
     current_hp: int        # 当前血量
-    max_hp: int            # 本周目满血
+    max_hp: int            # 当前 BOSS 满血；0 表示待校准
     is_active: bool        # 工会战是否进行中
     date: str              # 开始日期
 

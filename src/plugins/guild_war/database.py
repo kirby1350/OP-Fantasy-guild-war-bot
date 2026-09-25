@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .models import KnifeRecord, KnifeType, BossStatus, Reservation, UserDailySummary
-from .config import MAX_KNIVES_PER_DAY, get_boss_stage, BOSS_STAGES
+from .config import BossStage, BOSS_REPEAT_FROM, get_boss_stage
 
 DB_PATH = Path("data/guild_war.db")
 
@@ -56,11 +56,76 @@ async def init_db():
                 count INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (user_id, group_id, date)
             );
+
+            CREATE TABLE IF NOT EXISTS homework (
+                group_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                image BLOB NOT NULL,
+                updated_by TEXT NOT NULL,
+                PRIMARY KEY (group_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS boss_hp_settings (
+                group_id TEXT NOT NULL,
+                boss_round INTEGER NOT NULL,
+                max_hp INTEGER NOT NULL,
+                PRIMARY KEY (group_id, boss_round)
+            );
         """)
         await db.commit()
 
 
+async def save_homework(group_id: str, name: str, image: bytes, user_id: str):
+    """图片下载验证成功后再原子替换，保留旧作业直到新图片可用。"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO homework (group_id, name, image, updated_by) VALUES (?, ?, ?, ?)
+            ON CONFLICT(group_id, name) DO UPDATE SET
+                image=excluded.image, updated_by=excluded.updated_by
+        """, (group_id, name, image, user_id))
+        await db.commit()
+
+
+async def get_homework(group_id: str, name: str) -> Optional[bytes]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT image FROM homework WHERE group_id=? AND name=?", (group_id, name)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
 # ─── Boss Status ────────────────────────────────────────────────────────────
+
+async def get_group_boss_stage(group_id: str, round_num: int) -> BossStage:
+    stage = get_boss_stage(round_num)
+    key = min(round_num, BOSS_REPEAT_FROM)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT max_hp FROM boss_hp_settings WHERE group_id=? AND boss_round=?",
+            (group_id, key),
+        ) as cursor:
+            row = await cursor.fetchone()
+    if row:
+        return BossStage(name=f"同盟战第 {round_num} 只 BOSS（本群校准）",
+                         hp=row[0], round_start=round_num)
+    return stage
+
+
+async def calibrate_boss(group_id: str, round_num: int, max_hp: int, current_hp: int):
+    """原子保存本群的血量配置和当前 BOSS；不删除已有报刀记录。"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO boss_hp_settings (group_id, boss_round, max_hp) VALUES (?, ?, ?)
+            ON CONFLICT(group_id, boss_round) DO UPDATE SET max_hp=excluded.max_hp
+        """, (group_id, min(round_num, BOSS_REPEAT_FROM), max_hp))
+        await db.execute("""
+            INSERT INTO boss_status (group_id, round_num, current_hp, max_hp, is_active, date)
+            VALUES (?, ?, ?, ?, 1, ?)
+            ON CONFLICT(group_id) DO UPDATE SET round_num=excluded.round_num,
+                current_hp=excluded.current_hp, max_hp=excluded.max_hp, is_active=1
+        """, (group_id, round_num, current_hp, max_hp, date.today().isoformat()))
+        await db.commit()
 
 async def get_boss_status(group_id: str) -> Optional[BossStatus]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -79,7 +144,9 @@ async def get_boss_status(group_id: str) -> Optional[BossStatus]:
 
 async def create_boss_status(group_id: str) -> BossStatus:
     """初始化工会战（第1周目，满血）"""
-    stage = get_boss_stage(1)
+    stage = await get_group_boss_stage(group_id, 1)
+    if stage.hp <= 0:
+        raise ValueError("第 1 只 BOSS 血量未配置，请管理员使用「设置BOSS 1 <满血>」。")
     today = date.today().isoformat()
     status = BossStatus(
         group_id=group_id, round_num=1, current_hp=stage.hp,

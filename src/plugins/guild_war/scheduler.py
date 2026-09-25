@@ -1,65 +1,44 @@
-"""定时任务：每日催刀提醒"""
+"""官方 QQ 主动催刀：仅在明确配置并具备平台权限时启用。"""
 
-from nonebot import get_bot, require, get_driver
-from nonebot.adapters.onebot.v11 import Bot, MessageSegment
+from nonebot import get_bot, get_plugin_config, logger, require
+from nonebot.adapters.qq import Bot
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
-from .config import REMIND_TIMES, MAX_KNIVES_PER_DAY
-from .database import get_boss_status, get_today_summary
-
-import os
-
-GW_GROUP_ID = os.getenv("GW_GROUP_ID", "")
+from .config import REMIND_TIMES
+from .database import get_boss_status
+from .qq_gateway import QQSettings, group_key
+from .services import build_reminder
 
 
-async def send_remind(bot: Bot, group_id: str):
-    """发送催刀消息"""
-    status = await get_boss_status(group_id)
-    if not status or not status.is_active:
+async def run_reminders():
+    settings = get_plugin_config(QQSettings)
+    if not settings.gw_enable_proactive_reminders:
         return
-
-    summaries = await get_today_summary(group_id)
-    # 找出未完成的成员
-    incomplete = []
-    for s in summaries:
-        used = s.normal_count + s.tail_count
-        if used < MAX_KNIVES_PER_DAY:
-            left = MAX_KNIVES_PER_DAY - used
-            incomplete.append((s.user_id, s.user_name, left, s.has_compensate_left))
-
-    if not incomplete:
-        await bot.send_group_msg(
-            group_id=int(group_id),
-            message="✅ 全员出刀完毕，辛苦大家！"
-        )
-        return
-
-    lines = ["⏰ 催刀提醒！以下成员今日尚未出完刀：\n"]
-    at_segments = []
-    for uid, name, left, has_comp in incomplete:
-        comp_hint = "（有补偿刀）" if has_comp else ""
-        lines.append(f"· {name}：还差 {left} 刀{comp_hint}")
-        at_segments.append(MessageSegment.at(uid))
-
-    lines.append(f"\n请尽快完成今日出刀！")
-
-    # 先发@，再发文字
-    msg = "".join(str(s) for s in at_segments) + "\n" + "\n".join(lines)
-    await bot.send_group_msg(group_id=int(group_id), message=msg)
+    for app_id, group_openids in settings.gw_reminder_targets.items():
+        for group_openid in dict.fromkeys(group_openids):
+            try:
+                bot = get_bot(app_id)
+                if not isinstance(bot, Bot):
+                    continue
+                key = group_key(app_id, group_openid)
+                status = await get_boss_status(key)
+                if status and status.is_active:
+                    # 主动消息不伪造 msg_id，也不借用过期用户消息。
+                    await bot.send_to_group(group_openid, await build_reminder(key))
+            except Exception:
+                logger.warning(
+                    f"QQ 主动催刀失败（AppID={app_id}），请检查连接、群授权和主动消息额度。"
+                )
 
 
-# 注册定时任务
 for hour, minute in REMIND_TIMES:
-    @scheduler.scheduled_job("cron", hour=hour, minute=minute,
-                              id=f"gw_remind_{hour}_{minute}")
-    async def _remind_job(h=hour, m=minute):
-        if not GW_GROUP_ID:
-            return
-        try:
-            bot: Bot = get_bot()
-            await send_remind(bot, GW_GROUP_ID)
-        except Exception as e:
-            import logging
-            logging.warning(f"催刀定时任务失败: {e}")
+    scheduler.add_job(
+        run_reminders,
+        "cron",
+        hour=hour,
+        minute=minute,
+        timezone="Asia/Shanghai",
+        id=f"gw_remind_{hour}_{minute}",
+    )

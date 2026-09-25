@@ -1,0 +1,26 @@
+[Unit]
+Description=OP Fantasy Guild War QQ Official Bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=guildwar-bot
+Group=guildwar-bot
+WorkingDirectory=/srv/op-fantasy-guild-war-bot
+ExecStart=/srv/op-fantasy-guild-war-bot/.venv/bin/python bot.py
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=MPLCONFIGDIR=/srv/op-fantasy-guild-war-bot/data/matplotlib
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/op-fantasy-guild-war-bot/data
+
+[Install]
+WantedBy=multi-user.target
