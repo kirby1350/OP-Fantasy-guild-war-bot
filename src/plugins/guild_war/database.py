@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .models import (
-    KnifeRecord, KnifeType, BossStatus, QueueEntry, UserDailySummary,
+    KnifeRecord, KnifeType, BossStatus, QueueEntry, Reservation, UserDailySummary,
     Member, Homework,
 )
 from .config import MAX_KNIVES_PER_DAY, get_boss_stage, BOSS_STAGES
@@ -64,6 +64,16 @@ async def init_db():
                 user_name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (member_id, group_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS boss_reservations (
+                member_id INTEGER NOT NULL,
+                group_id TEXT NOT NULL,
+                user_name TEXT NOT NULL,
+                boss_round INTEGER NOT NULL,
+                notified INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (member_id, group_id, boss_round)
             );
 
             CREATE TABLE IF NOT EXISTS compensate_knives (
@@ -171,6 +181,7 @@ async def delete_member(member_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM member_accounts WHERE member_id=?", (member_id,))
         await db.execute("DELETE FROM queue WHERE member_id=?", (member_id,))
+        await db.execute("DELETE FROM boss_reservations WHERE member_id=?", (member_id,))
         await db.execute("DELETE FROM members WHERE id=?", (member_id,))
         await db.commit()
 
@@ -386,6 +397,74 @@ async def get_queue(group_id: str) -> List[QueueEntry]:
 async def clear_queue(group_id: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM queue WHERE group_id=?", (group_id,))
+        await db.commit()
+
+
+# ─── Reservations ───────────────────────────────────────────────────────────
+
+async def add_reservation(member_id: int, group_id: str, user_name: str,
+                          boss_round: int) -> bool:
+    """预约某周目，返回是否成功（False表示已预约过）"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute("""
+                INSERT INTO boss_reservations
+                (member_id, group_id, user_name, boss_round, notified, created_at)
+                VALUES (?, ?, ?, ?, 0, ?)
+            """, (member_id, group_id, user_name, boss_round, datetime.now().isoformat()))
+            await db.commit()
+            return True
+        except aiosqlite.IntegrityError:
+            return False
+
+
+async def cancel_reservations(member_id: int, group_id: str,
+                              boss_round: Optional[int] = None) -> int:
+    """取消预约（不指定周目则取消全部未提醒的预约），返回取消数量"""
+    sql = "DELETE FROM boss_reservations WHERE member_id=? AND group_id=? AND notified=0"
+    params: tuple = (member_id, group_id)
+    if boss_round is not None:
+        sql += " AND boss_round=?"
+        params += (boss_round,)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(sql, params)
+        await db.commit()
+        return cursor.rowcount
+
+
+async def get_reservations(group_id: str, boss_round: Optional[int] = None,
+                           pending_only: bool = True) -> List[Reservation]:
+    sql = """SELECT member_id, group_id, user_name, boss_round, notified, created_at
+             FROM boss_reservations WHERE group_id=?"""
+    params: tuple = (group_id,)
+    if boss_round is not None:
+        sql += " AND boss_round=?"
+        params += (boss_round,)
+    if pending_only:
+        sql += " AND notified=0"
+    sql += " ORDER BY boss_round, created_at"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(sql, params) as cursor:
+            return [
+                Reservation(member_id=r[0], group_id=r[1], user_name=r[2],
+                            boss_round=r[3], notified=bool(r[4]),
+                            created_at=datetime.fromisoformat(r[5]))
+                for r in await cursor.fetchall()
+            ]
+
+
+async def mark_reservations_notified(group_id: str, boss_round: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE boss_reservations SET notified=1 WHERE group_id=? AND boss_round=?",
+            (group_id, boss_round)
+        )
+        await db.commit()
+
+
+async def clear_reservations(group_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM boss_reservations WHERE group_id=?", (group_id,))
         await db.commit()
 
 

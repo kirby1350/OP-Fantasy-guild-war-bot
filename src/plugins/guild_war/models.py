@@ -70,6 +70,17 @@ class QueueEntry:
 
 
 @dataclass
+class Reservation:
+    """预约某一周目的BOSS，到达该周目时@提醒"""
+    member_id: int
+    group_id: str
+    user_name: str
+    boss_round: int
+    notified: bool
+    created_at: datetime
+
+
+@dataclass
 class UserDailySummary:
     """成员当日汇总"""
     member_id: int

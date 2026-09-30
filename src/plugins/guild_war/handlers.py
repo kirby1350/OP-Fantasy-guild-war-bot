@@ -18,7 +18,7 @@ from .database import (
     get_boss_status, create_boss_status, update_boss_status,
     add_knife_record, get_member_today_records, delete_last_knife,
     add_compensate_knife, get_compensate_count, use_compensate_knife,
-    get_today_summary, get_queue, clear_queue,
+    get_today_summary, get_queue, clear_queue, get_reservations, clear_reservations,
 )
 from .members import require_member
 from .models import KnifeRecord, KnifeType
@@ -42,6 +42,7 @@ async def handle_start_gw(bot: Bot, event: GroupMessageEvent):
     group_id = str(event.group_id)
     status = await create_boss_status(group_id)
     await clear_queue(group_id)
+    await clear_reservations(group_id)
     stage = get_boss_stage(status.round_num)
     await start_gw.finish(
         f"⚔️ 工会战开始！\n"
@@ -62,6 +63,7 @@ async def handle_end_gw(bot: Bot, event: GroupMessageEvent):
     status.is_active = False
     await update_boss_status(status)
     await clear_queue(group_id)
+    await clear_reservations(group_id)
     await end_gw.finish("✅ 今日工会战结束，辛苦各位团员！")
 
 
@@ -81,6 +83,9 @@ async def handle_boss_status(event: GroupMessageEvent):
     hp_bar = "█" * bar_len + "░" * (20 - bar_len)
     queue = await get_queue(group_id)
     res_text = f"\n━━━━━━━━━━━━━━\n📋 出刀队列：\n{format_queue(queue)}" if queue else ""
+    next_res = await get_reservations(group_id, status.round_num + 1)
+    if next_res:
+        res_text += f"\n🔔 下一周目预约：{'、'.join(r.user_name for r in next_res)}"
     await boss_status_cmd.finish(
         f"⚔️ 第 {status.round_num} 周目\n"
         f"BOSS：{stage.name}\n"
