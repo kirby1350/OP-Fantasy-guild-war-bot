@@ -1,11 +1,14 @@
 """
 工会战报刀 BOT 插件
-功能：报刀/撤刀/补偿刀、BOSS血量追踪、周目进阶、预约、进度查询、图表汇总、定时催刀
+功能：报刀/撤刀/补偿刀、BOSS血量追踪、周目进阶、预约、进度查询、图表汇总、定时催刀、
+      成员注册与多账号绑定、作业上传与查询
 """
 
 from nonebot import get_driver
 from .database import init_db
+from . import members  # noqa: F401 - 注册/绑定指令
 from . import handlers  # noqa: F401 - 注册所有指令
+from . import homework  # noqa: F401 - 作业指令
 from . import scheduler  # noqa: F401 - 注册定时任务
 
 driver = get_driver()

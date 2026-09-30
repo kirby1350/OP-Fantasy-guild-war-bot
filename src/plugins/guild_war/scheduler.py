@@ -1,17 +1,17 @@
 """定时任务：每日催刀提醒"""
 
 from nonebot import get_bot, require, get_driver
-from nonebot.adapters.onebot.v11 import Bot, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, Message
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
 from .config import REMIND_TIMES, MAX_KNIVES_PER_DAY
 from .database import get_boss_status, get_today_summary
+from .members import at_member
 
-import os
-
-GW_GROUP_ID = os.getenv("GW_GROUP_ID", "")
+# NoneBot 读取 .env 后不会写入系统环境变量，需从驱动配置中读取
+GW_GROUP_ID = str(getattr(get_driver().config, "gw_group_id", "") or "")
 
 
 async def send_remind(bot: Bot, group_id: str):
@@ -27,7 +27,7 @@ async def send_remind(bot: Bot, group_id: str):
         used = s.normal_count + s.tail_count
         if used < MAX_KNIVES_PER_DAY:
             left = MAX_KNIVES_PER_DAY - used
-            incomplete.append((s.user_id, s.user_name, left, s.has_compensate_left))
+            incomplete.append((s.user_ids, s.user_name, left, s.has_compensate_left))
 
     if not incomplete:
         await bot.send_group_msg(
@@ -37,16 +37,16 @@ async def send_remind(bot: Bot, group_id: str):
         return
 
     lines = ["⏰ 催刀提醒！以下成员今日尚未出完刀：\n"]
-    at_segments = []
-    for uid, name, left, has_comp in incomplete:
+    at_segments = Message()
+    for uids, name, left, has_comp in incomplete:
         comp_hint = "（有补偿刀）" if has_comp else ""
         lines.append(f"· {name}：还差 {left} 刀{comp_hint}")
-        at_segments.append(MessageSegment.at(uid))
+        at_segments += at_member(uids)  # 多账号成员会同时@所有账号
 
     lines.append(f"\n请尽快完成今日出刀！")
 
     # 先发@，再发文字
-    msg = "".join(str(s) for s in at_segments) + "\n" + "\n".join(lines)
+    msg = at_segments + "\n" + "\n".join(lines)
     await bot.send_group_msg(group_id=int(group_id), message=msg)
 
 

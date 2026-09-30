@@ -14,11 +14,12 @@ from .config import (
 )
 from .database import (
     get_boss_status, create_boss_status, update_boss_status,
-    add_knife_record, get_user_today_records, delete_last_knife,
+    add_knife_record, get_member_today_records, delete_last_knife,
     add_compensate_knife, get_compensate_count, use_compensate_knife,
     add_reservation, cancel_reservation, get_reservations,
-    clear_reservations_for_round, get_today_summary
+    clear_reservations_for_round, get_today_summary, get_member
 )
+from .members import require_member, at_member
 from .models import KnifeRecord, KnifeType, Reservation
 from .chart import generate_daily_chart
 
@@ -102,7 +103,8 @@ report_knife = on_command("报刀", block=True)
 async def handle_report_knife(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
     group_id = str(event.group_id)
     user_id = str(event.user_id)
-    user_name = event.sender.nickname or str(event.user_id)
+    member = await require_member(report_knife, event)
+    user_name = member.name
 
     # 检查工会战状态
     status = await get_boss_status(group_id)
@@ -116,10 +118,10 @@ async def handle_report_knife(bot: Bot, event: GroupMessageEvent, args: Message 
     damage = int(damage_str)
 
     # 检查刀数
-    today_records = await get_user_today_records(user_id, group_id)
+    today_records = await get_member_today_records(member.id, group_id)
     normal_used = sum(1 for r in today_records if r.knife_type in (KnifeType.NORMAL, KnifeType.TAIL))
     if normal_used >= MAX_KNIVES_PER_DAY:
-        comp = await get_compensate_count(user_id, group_id)
+        comp = await get_compensate_count(member.id, group_id)
         hint = "（你有补偿刀未使用，请用「补偿刀 <伤害>」）" if comp > 0 else ""
         await report_knife.finish(f"❌ 今日普通刀已用完（{MAX_KNIVES_PER_DAY}/{MAX_KNIVES_PER_DAY}）{hint}")
 
@@ -131,7 +133,7 @@ async def handle_report_knife(bot: Bot, event: GroupMessageEvent, args: Message 
 
     # 写入记录
     record = KnifeRecord(
-        id=None, user_id=user_id, user_name=user_name,
+        id=None, user_id=user_id, member_id=member.id, user_name=user_name,
         group_id=group_id, damage=actual_damage,
         knife_type=KnifeType.TAIL if is_kill else KnifeType.NORMAL,
         boss_round=status.round_num,
@@ -153,16 +155,21 @@ async def handle_report_knife(bot: Bot, event: GroupMessageEvent, args: Message 
 
         # 给予补偿刀
         if ENABLE_COMPENSATE_KNIFE:
-            await add_compensate_knife(user_id, group_id)
+            await add_compensate_knife(member.id, group_id)
 
         # 通知预约了下一周目的成员
         next_res = await get_reservations(group_id, status.round_num)
-        res_notice = ""
+        res_notice = Message()
         if next_res:
-            at_list = "".join(str(MessageSegment.at(r.user_id)) for r in next_res)
-            res_notice = f"\n\n📣 下一周目预约提醒：{at_list}"
+            at_list = Message()
+            for r in next_res:
+                m = await get_member(r.member_id)
+                if m:
+                    at_list += at_member(m.user_ids)
+            res_notice = Message("\n\n📣 下一周目预约提醒：") + at_list
 
         await report_knife.finish(
+            Message(
             f"💥 【击杀！】{user_name} 尾刀击杀BOSS！\n"
             f"伤害：{_fmt_hp(actual_damage)}\n"
             f"{'🎁 获得一次补偿刀！' if ENABLE_COMPENSATE_KNIFE else ''}\n"
@@ -170,7 +177,7 @@ async def handle_report_knife(bot: Bot, event: GroupMessageEvent, args: Message 
             f"➡️ 进入第 {status.round_num} 周目\n"
             f"BOSS：{new_stage.name}\n"
             f"HP：{_fmt_hp(new_stage.hp)}"
-            + res_notice
+            ) + res_notice
         )
     else:
         # 普通伤害
@@ -195,7 +202,8 @@ compensate_knife = on_command("补偿刀", block=True)
 async def handle_compensate(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
     group_id = str(event.group_id)
     user_id = str(event.user_id)
-    user_name = event.sender.nickname or str(event.user_id)
+    member = await require_member(compensate_knife, event)
+    user_name = member.name
 
     status = await get_boss_status(group_id)
     if not status or not status.is_active:
@@ -207,7 +215,7 @@ async def handle_compensate(bot: Bot, event: GroupMessageEvent, args: Message = 
     damage = int(damage_str)
 
     # 消耗补偿刀
-    ok = await use_compensate_knife(user_id, group_id)
+    ok = await use_compensate_knife(member.id, group_id)
     if not ok:
         await compensate_knife.finish("❌ 你今日没有可用的补偿刀。")
 
@@ -216,7 +224,7 @@ async def handle_compensate(bot: Bot, event: GroupMessageEvent, args: Message = 
     hp_after = max(0, status.current_hp - damage)
 
     record = KnifeRecord(
-        id=None, user_id=user_id, user_name=user_name,
+        id=None, user_id=user_id, member_id=member.id, user_name=user_name,
         group_id=group_id, damage=actual_damage,
         knife_type=KnifeType.COMPENSATE,
         boss_round=status.round_num,
@@ -260,13 +268,13 @@ undo_knife = on_command("撤刀", block=True)
 @undo_knife.handle()
 async def handle_undo(bot: Bot, event: GroupMessageEvent):
     group_id = str(event.group_id)
-    user_id = str(event.user_id)
+    member = await require_member(undo_knife, event)
 
     status = await get_boss_status(group_id)
     if not status or not status.is_active:
         await undo_knife.finish("❌ 当前没有进行中的工会战。")
 
-    record = await delete_last_knife(user_id, group_id)
+    record = await delete_last_knife(member.id, group_id)
     if not record:
         await undo_knife.finish("❌ 今日没有可撤销的出刀记录。")
 
@@ -290,15 +298,15 @@ reserve_cmd = on_command("预约", block=True)
 @reserve_cmd.handle()
 async def handle_reserve(bot: Bot, event: GroupMessageEvent):
     group_id = str(event.group_id)
-    user_id = str(event.user_id)
-    user_name = event.sender.nickname or str(event.user_id)
+    member = await require_member(reserve_cmd, event)
+    user_name = member.name
 
     status = await get_boss_status(group_id)
     if not status or not status.is_active:
         await reserve_cmd.finish("❌ 当前没有进行中的工会战。")
 
     res = Reservation(
-        id=None, user_id=user_id, user_name=user_name,
+        id=None, member_id=member.id, user_name=user_name,
         group_id=group_id, boss_round=status.round_num
     )
     ok = await add_reservation(res)
@@ -318,13 +326,13 @@ cancel_reserve_cmd = on_command("取消预约", block=True)
 @cancel_reserve_cmd.handle()
 async def handle_cancel_reserve(bot: Bot, event: GroupMessageEvent):
     group_id = str(event.group_id)
-    user_id = str(event.user_id)
+    member = await require_member(cancel_reserve_cmd, event)
 
     status = await get_boss_status(group_id)
     if not status:
         await cancel_reserve_cmd.finish("❌ 当前没有进行中的工会战。")
 
-    ok = await cancel_reservation(user_id, group_id, status.round_num)
+    ok = await cancel_reservation(member.id, group_id, status.round_num)
     if not ok:
         await cancel_reserve_cmd.finish("❌ 你没有预约当前BOSS。")
     await cancel_reserve_cmd.finish("✅ 已取消预约。")
@@ -340,13 +348,13 @@ async def handle_progress(bot: Bot, event: GroupMessageEvent):
     summaries = await get_today_summary(group_id)
 
     if not summaries:
-        await progress_cmd.finish("今日暂无出刀记录。")
+        await progress_cmd.finish("暂无注册成员，请成员先发送「注册 <游戏名>」。")
 
     lines = ["📊 今日出刀进度：\n"]
     total_damage = 0
     for s in summaries:
         knife_used = s.normal_count + s.tail_count
-        icons = "⚔️" * knife_used + "🎁" * s.compensate_count
+        icons = ("⚔️" * knife_used + "🎁" * s.compensate_count) or "未出刀"
         comp_hint = " [有补偿刀]" if s.has_compensate_left else ""
         lines.append(
             f"{s.user_name}：{icons} {_fmt_hp(s.total_damage)}{comp_hint}"
@@ -367,7 +375,7 @@ async def handle_chart(bot: Bot, event: GroupMessageEvent):
     summaries = await get_today_summary(group_id)
 
     if not summaries:
-        await chart_cmd.finish("今日暂无出刀记录，无法生成汇总。")
+        await chart_cmd.finish("暂无注册成员，无法生成汇总。")
 
     status = await get_boss_status(group_id)
     round_num = status.round_num if status else 1
@@ -375,7 +383,7 @@ async def handle_chart(bot: Bot, event: GroupMessageEvent):
     img_path = await generate_daily_chart(summaries, round_num, group_id)
     await bot.send_group_msg(
         group_id=event.group_id,
-        message=MessageSegment.image(f"file:///{img_path.absolute()}")
+        message=MessageSegment.image(img_path.read_bytes())
     )
 
 

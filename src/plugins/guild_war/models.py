@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 
 class KnifeType(str, Enum):
@@ -13,11 +13,32 @@ class KnifeType(str, Enum):
 
 
 @dataclass
+class Member:
+    """已注册的工会成员，可绑定多个QQ号"""
+    id: int
+    group_id: str
+    name: str
+    user_ids: List[str]
+
+
+@dataclass
+class Homework:
+    """作业（攻略图）"""
+    id: int
+    group_id: str
+    title: str
+    image_paths: List[str]
+    uploader_id: str
+    created_at: datetime
+
+
+@dataclass
 class KnifeRecord:
     """单次出刀记录"""
     id: Optional[int]
-    user_id: str           # QQ号
-    user_name: str         # 昵称
+    user_id: str           # 实际报刀的QQ号
+    member_id: int         # 所属成员（多个QQ号可属于同一成员）
+    user_name: str         # 成员名
     group_id: str          # 群号
     damage: int            # 伤害值
     knife_type: KnifeType  # 刀类型
@@ -43,7 +64,7 @@ class BossStatus:
 class Reservation:
     """BOSS预约"""
     id: Optional[int]
-    user_id: str
+    member_id: int
     user_name: str
     group_id: str
     boss_round: int        # 预约的周目
@@ -52,9 +73,10 @@ class Reservation:
 
 @dataclass
 class UserDailySummary:
-    """用户当日汇总"""
-    user_id: str
+    """成员当日汇总"""
+    member_id: int
     user_name: str
+    user_ids: List[str]     # 该成员绑定的全部QQ号（用于@）
     normal_count: int       # 普通刀数
     tail_count: int         # 尾刀数
     compensate_count: int   # 补偿刀数

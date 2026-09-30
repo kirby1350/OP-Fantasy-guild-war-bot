@@ -11,4 +11,4 @@ driver.register_adapter(OneBot11Adapter)
 nonebot.load_plugin("src.plugins.guild_war")
 
 if __name__ == "__main__":
-    nonebot.run(app="bot:app")
+    nonebot.run()
