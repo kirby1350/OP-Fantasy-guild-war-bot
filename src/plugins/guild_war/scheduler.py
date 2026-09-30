@@ -25,7 +25,7 @@ async def send_remind(bot: Bot, group_id: str):
     incomplete = []
     for s in summaries:
         used = s.normal_count + s.tail_count
-        if used < MAX_KNIVES_PER_DAY:
+        if used < MAX_KNIVES_PER_DAY or s.has_compensate_left:
             left = MAX_KNIVES_PER_DAY - used
             incomplete.append((s.user_ids, s.user_name, left, s.has_compensate_left))
 
@@ -39,8 +39,8 @@ async def send_remind(bot: Bot, group_id: str):
     lines = ["⏰ 催刀提醒！以下成员今日尚未出完刀：\n"]
     at_segments = Message()
     for uids, name, left, has_comp in incomplete:
-        comp_hint = "（有补偿刀）" if has_comp else ""
-        lines.append(f"· {name}：还差 {left} 刀{comp_hint}")
+        parts = ([f"还差 {left} 刀"] if left else []) + (["有补偿刀未用"] if has_comp else [])
+        lines.append(f"· {name}：{'，'.join(parts)}")
         at_segments += at_member(uids)  # 多账号成员会同时@所有账号
 
     lines.append(f"\n请尽快完成今日出刀！")

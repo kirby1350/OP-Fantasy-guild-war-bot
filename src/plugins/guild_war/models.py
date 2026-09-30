@@ -61,14 +61,12 @@ class BossStatus:
 
 
 @dataclass
-class Reservation:
-    """BOSS预约"""
-    id: Optional[int]
+class QueueEntry:
+    """出刀队列（排队）"""
     member_id: int
-    user_name: str
     group_id: str
-    boss_round: int        # 预约的周目
-    created_at: datetime = field(default_factory=datetime.now)
+    user_name: str
+    created_at: datetime
 
 
 @dataclass

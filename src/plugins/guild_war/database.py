@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .models import (
-    KnifeRecord, KnifeType, BossStatus, Reservation, UserDailySummary,
+    KnifeRecord, KnifeType, BossStatus, QueueEntry, UserDailySummary,
     Member, Homework,
 )
 from .config import MAX_KNIVES_PER_DAY, get_boss_stage, BOSS_STAGES
@@ -58,14 +58,12 @@ async def init_db():
                 date TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS reservations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+            CREATE TABLE IF NOT EXISTS queue (
                 member_id INTEGER NOT NULL,
-                user_name TEXT NOT NULL,
                 group_id TEXT NOT NULL,
-                boss_round INTEGER NOT NULL,
+                user_name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                UNIQUE(member_id, group_id, boss_round)
+                PRIMARY KEY (member_id, group_id)
             );
 
             CREATE TABLE IF NOT EXISTS compensate_knives (
@@ -172,7 +170,7 @@ async def delete_member(member_id: int):
     """注销成员及其所有绑定账号（出刀记录保留）"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM member_accounts WHERE member_id=?", (member_id,))
-        await db.execute("DELETE FROM reservations WHERE member_id=?", (member_id,))
+        await db.execute("DELETE FROM queue WHERE member_id=?", (member_id,))
         await db.execute("DELETE FROM members WHERE id=?", (member_id,))
         await db.commit()
 
@@ -346,56 +344,48 @@ async def use_compensate_knife(member_id: int, group_id: str) -> bool:
     return True
 
 
-# ─── Reservations ───────────────────────────────────────────────────────────
+# ─── Queue ──────────────────────────────────────────────────────────────────
 
-async def add_reservation(res: Reservation) -> bool:
-    """添加预约，返回是否成功（False表示已预约）"""
+async def add_to_queue(member_id: int, group_id: str, user_name: str) -> bool:
+    """加入出刀队列，返回是否成功（False表示已在队列中）"""
     async with aiosqlite.connect(DB_PATH) as db:
         try:
             await db.execute("""
-                INSERT INTO reservations (member_id, user_name, group_id, boss_round, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (res.member_id, res.user_name, res.group_id,
-                  res.boss_round, res.created_at.isoformat()))
+                INSERT INTO queue (member_id, group_id, user_name, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (member_id, group_id, user_name, datetime.now().isoformat()))
             await db.commit()
             return True
         except aiosqlite.IntegrityError:
             return False
 
 
-async def cancel_reservation(member_id: int, group_id: str, boss_round: int) -> bool:
+async def remove_from_queue(member_id: int, group_id: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("""
-            DELETE FROM reservations WHERE member_id=? AND group_id=? AND boss_round=?
-        """, (member_id, group_id, boss_round))
+        cursor = await db.execute(
+            "DELETE FROM queue WHERE member_id=? AND group_id=?", (member_id, group_id)
+        )
         await db.commit()
         return cursor.rowcount > 0
 
 
-async def get_reservations(group_id: str, boss_round: int) -> List[Reservation]:
+async def get_queue(group_id: str) -> List[QueueEntry]:
+    """按排队先后返回队列，第一位为当前出刀人"""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT id, member_id, user_name, group_id, boss_round, created_at
-            FROM reservations WHERE group_id=? AND boss_round=?
-            ORDER BY created_at
-        """, (group_id, boss_round)) as cursor:
-            rows = await cursor.fetchall()
+            SELECT member_id, group_id, user_name, created_at
+            FROM queue WHERE group_id=? ORDER BY created_at
+        """, (group_id,)) as cursor:
             return [
-                Reservation(
-                    id=r[0], member_id=r[1], user_name=r[2],
-                    group_id=r[3], boss_round=r[4],
-                    created_at=datetime.fromisoformat(r[5])
-                ) for r in rows
+                QueueEntry(member_id=r[0], group_id=r[1], user_name=r[2],
+                           created_at=datetime.fromisoformat(r[3]))
+                for r in await cursor.fetchall()
             ]
 
 
-async def clear_reservations_for_round(group_id: str, boss_round: int):
-    """BOSS被击杀后清理该周目预约"""
+async def clear_queue(group_id: str):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "DELETE FROM reservations WHERE group_id=? AND boss_round=?",
-            (group_id, boss_round)
-        )
+        await db.execute("DELETE FROM queue WHERE group_id=?", (group_id,))
         await db.commit()
 
 
