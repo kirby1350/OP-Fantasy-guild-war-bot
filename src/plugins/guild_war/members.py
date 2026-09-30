@@ -7,8 +7,9 @@ from nonebot.adapters.onebot.v11 import (
     Bot, GroupMessageEvent, Message, MessageSegment, GROUP_ADMIN, GROUP_OWNER
 )
 from nonebot.internal.matcher import Matcher
-from nonebot.params import CommandArg
+from nonebot.params import ArgPlainText, CommandArg
 from nonebot.permission import SUPERUSER
+from nonebot.typing import T_State
 
 from .database import (
     get_member_by_user, create_member, bind_account, unbind_account,
@@ -173,4 +174,30 @@ async def handle_delete_member(event: GroupMessageEvent, args: Message = Command
     await delete_member(member.id)
     await delete_member_cmd.finish(
         f"✅ 已注销成员「{member.name}」及其 {len(member.user_ids)} 个账号。"
+    )
+
+
+# ─── 解除注册（本人） ────────────────────────────────────────────────────────
+
+unregister_cmd = on_command("解除注册", aliases={"取消注册"}, block=True)
+
+@unregister_cmd.handle()
+async def handle_unregister(event: GroupMessageEvent, state: T_State):
+    member = await require_member(unregister_cmd, event)
+    state["member_id"] = member.id
+    state["member_name"] = member.name
+    accounts = f"及其 {len(member.user_ids)} 个绑定账号" if len(member.user_ids) > 1 else ""
+    await unregister_cmd.send(
+        f"⚠️ 确定要解除「{member.name}」的注册{accounts}吗？\n"
+        f"发送「确认」继续，发送其他内容取消。"
+    )
+
+
+@unregister_cmd.got("confirm")
+async def handle_unregister_confirm(state: T_State, confirm: str = ArgPlainText()):
+    if confirm.strip() != "确认":
+        await unregister_cmd.finish("已取消。")
+    await delete_member(state["member_id"])
+    await unregister_cmd.finish(
+        f"✅ 已解除「{state['member_name']}」的注册，今日出刀记录保留。"
     )

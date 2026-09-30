@@ -9,6 +9,7 @@ from .database import init_db
 from . import members  # noqa: F401 - 注册/绑定指令
 from . import handlers  # noqa: F401 - 注册所有指令
 from . import homework  # noqa: F401 - 作业指令
+from . import help  # noqa: F401 - 帮助菜单与@交互
 from . import scheduler  # noqa: F401 - 注册定时任务
 
 driver = get_driver()
