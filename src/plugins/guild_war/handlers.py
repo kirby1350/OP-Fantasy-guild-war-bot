@@ -39,7 +39,7 @@ def _format_knife_count(records) -> str:
 
 # ─── 开启/结束工会战（管理员） ──────────────────────────────────────────────
 
-start_gw = on_command("开启工会战", permission=SUPERUSER, block=True)
+start_gw = on_command("开启工会战", aliases={"开启公会战"}, permission=SUPERUSER, block=True)
 
 @start_gw.handle()
 async def handle_start_gw(bot: Bot, event: GroupMessageEvent):
@@ -54,7 +54,7 @@ async def handle_start_gw(bot: Bot, event: GroupMessageEvent):
     )
 
 
-end_gw = on_command("结束工会战", permission=SUPERUSER, block=True)
+end_gw = on_command("结束工会战", aliases={"结束公会战"}, permission=SUPERUSER, block=True)
 
 @end_gw.handle()
 async def handle_end_gw(bot: Bot, event: GroupMessageEvent):
